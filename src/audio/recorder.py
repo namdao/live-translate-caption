@@ -30,12 +30,26 @@ class Recorder:
             self._chunks.append(chunk)
             self._audio_queue.put(chunk)
 
-    def start(self):
+    @staticmethod
+    def list_input_devices() -> list:
+        """Returns list of dicts: {index, name} for all input-capable devices."""
+        devices = []
+        for i, d in enumerate(sd.query_devices()):
+            if d['max_input_channels'] > 0:
+                devices.append({'index': i, 'name': d['name']})
+        return devices
+
+    def start(self, device_index: int = None):
+        """Start recording. device_index=None uses system default."""
         try:
             devices = sd.query_devices()
             input_devices = [d for d in devices if d['max_input_channels'] > 0]
             if not input_devices:
-                raise MicrophoneNotFoundError("No microphone found")
+                raise MicrophoneNotFoundError("No input device found")
+            if device_index is not None:
+                d = devices[device_index]
+                if d['max_input_channels'] < 1:
+                    raise MicrophoneNotFoundError(f"Device '{d['name']}' has no input channels")
         except Exception as e:
             if isinstance(e, MicrophoneNotFoundError):
                 raise
@@ -52,12 +66,13 @@ class Recorder:
                 channels=self.CHANNELS,
                 blocksize=self.CHUNK_SIZE,
                 dtype='float32',
+                device=device_index,
                 callback=self._callback,
             )
             self._stream.start()
         except sd.PortAudioError as e:
             self._recording = False
-            raise MicrophoneNotFoundError(f"Could not open microphone: {e}")
+            raise MicrophoneNotFoundError(f"Could not open device: {e}")
 
     def pause(self):
         with self._lock:

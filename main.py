@@ -20,10 +20,10 @@ def main():
     window = MainWindow()
     translator = Translator()
 
-    result_queue: queue.Queue = queue.Queue()      # (timestamp, text, language)
-    translation_queue: queue.Queue = queue.Queue() # (timestamp, translated_text)
+    result_queue: queue.Queue = queue.Queue()       # (timestamp, text, language)
+    translation_queue: queue.Queue = queue.Queue()  # (timestamp, translated_text)
 
-    # --- Load Whisper model in background ---
+    # --- Load Whisper model in background (keeps UI responsive) ---
     whisper_engine: list = [None]
     engine_error: list = [None]
     engine_ready = threading.Event()
@@ -39,29 +39,23 @@ def main():
     threading.Thread(target=load_engine, daemon=True).start()
     window.show_status("Loading Whisper model...")
 
-    # --- Active chunk processor ---
     chunk_processor: list = [None]
     engine_status_shown = [False]
 
-    # --- Poll queues every 500ms (main thread — safe for UI updates) ---
+    # --- Poll queues every 200ms (main thread — safe for UI updates) ---
     def poll():
-        # Show engine ready/error status once
         if not engine_status_shown[0] and engine_ready.is_set():
             engine_status_shown[0] = True
             if engine_error[0]:
-                window.show_status(f"Error loading model: {engine_error[0]}")
+                window.show_status(f"Error: {engine_error[0]}")
             else:
                 window.show_status("Ready — click Record to start")
 
-        # Drain transcription results
         while not result_queue.empty():
             try:
                 timestamp, text, language = result_queue.get_nowait()
-                import time as _time
-                print(f"[UI] showing transcript at wall={_time.strftime('%H:%M:%S')}", flush=True)
                 window.append_transcript(f"[{timestamp}] {text}")
                 window.set_transcribing(False)
-
                 src = window.get_source_lang()
                 tgt = window.get_target_lang()
 
@@ -72,7 +66,6 @@ def main():
             except queue.Empty:
                 break
 
-        # Drain translation results
         while not translation_queue.empty():
             try:
                 timestamp, result = translation_queue.get_nowait()
@@ -95,7 +88,7 @@ def main():
             window.show_error(engine_error[0])
             return
         try:
-            recorder.start()
+            recorder.start(device_index=window.get_device_index())
             cp = ChunkProcessor(
                 recorder.audio_queue, result_queue, whisper_engine[0],
                 get_language=window.get_source_lang,
@@ -109,7 +102,6 @@ def main():
         if chunk_processor[0]:
             chunk_processor[0].stop()
             chunk_processor[0] = None
-
         try:
             path = recorder.stop()
             if path:

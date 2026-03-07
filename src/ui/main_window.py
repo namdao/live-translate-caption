@@ -5,6 +5,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 
+import sounddevice as sd
+
 STYLE = """
 QMainWindow, QWidget {
     background-color: #1a1a2e;
@@ -117,6 +119,21 @@ class MainWindow(QMainWindow):
         self._status_dot.setStyleSheet("color: #444466; font-size: 20px;")
         top.addWidget(self._status_dot)
         layout.addLayout(top)
+
+        # --- Device selector row ---
+        dev_row = QHBoxLayout()
+        dev_row.addWidget(QLabel("Input device:"))
+        self._device_combo = QComboBox()
+        self._device_combo.setMinimumWidth(260)
+        dev_row.addWidget(self._device_combo)
+        refresh_btn = QPushButton("↺")
+        refresh_btn.setFixedWidth(32)
+        refresh_btn.setToolTip("Refresh device list")
+        refresh_btn.clicked.connect(self._refresh_devices)
+        dev_row.addWidget(refresh_btn)
+        dev_row.addStretch()
+        layout.addLayout(dev_row)
+        self._refresh_devices()
 
         # --- Language selector row ---
         lang_row = QHBoxLayout()
@@ -279,6 +296,17 @@ class MainWindow(QMainWindow):
 
     def set_transcribing(self, active: bool):
         self._spinner.setText("⏳ Transcribing..." if active else "")
+
+    def _refresh_devices(self):
+        self._device_combo.clear()
+        self._device_combo.addItem("Default (system microphone)", userData=None)
+        for idx, d in enumerate(sd.query_devices()):
+            if d['max_input_channels'] > 0:
+                self._device_combo.addItem(d['name'], userData=idx)
+
+    def get_device_index(self):
+        """Returns selected device index, or None for system default."""
+        return self._device_combo.currentData()
 
     def get_source_lang(self) -> str:
         idx = self._src_combo.currentIndex()
