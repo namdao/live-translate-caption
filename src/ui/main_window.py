@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QTextEdit, QLabel, QStatusBar
+    QPushButton, QTextEdit, QLabel, QStatusBar, QComboBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -42,7 +42,43 @@ QStatusBar {
     background-color: #0f3460;
     color: #e0e0e0;
 }
+QComboBox {
+    background-color: #16213e;
+    color: #e0e0e0;
+    border: 1px solid #e94560;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
+}
+QComboBox::drop-down {
+    border: none;
+}
+QComboBox QAbstractItemView {
+    background-color: #16213e;
+    color: #e0e0e0;
+    selection-background-color: #e94560;
+}
 """
+
+_SOURCE_LANGS = [
+    ("Auto",       "auto"),
+    ("Vietnamese", "vi"),
+    ("English",    "en"),
+    ("Japanese",   "ja"),
+    ("Korean",     "ko"),
+    ("Chinese",    "zh-CN"),
+]
+
+_TARGET_LANGS = [
+    ("Vietnamese", "vi"),
+    ("English",    "en"),
+    ("Japanese",   "ja"),
+    ("Korean",     "ko"),
+    ("Chinese",    "zh-CN"),
+    ("French",     "fr"),
+    ("Spanish",    "es"),
+    ("German",     "de"),
+]
 
 
 class MainWindow(QMainWindow):
@@ -54,7 +90,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RealTime Recorder")
-        self.setMinimumSize(700, 500)
+        self.setMinimumSize(900, 560)
         self.setStyleSheet(STYLE)
 
         self._elapsed_seconds = 0
@@ -68,7 +104,7 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
         layout.setContentsMargins(16, 16, 16, 8)
 
         # --- Top bar ---
@@ -82,11 +118,55 @@ class MainWindow(QMainWindow):
         top.addWidget(self._status_dot)
         layout.addLayout(top)
 
-        # --- Transcript area ---
+        # --- Language selector row ---
+        lang_row = QHBoxLayout()
+        lang_row.addWidget(QLabel("Source:"))
+        self._src_combo = QComboBox()
+        for name, _ in _SOURCE_LANGS:
+            self._src_combo.addItem(name)
+        lang_row.addWidget(self._src_combo)
+
+        arrow = QLabel("→ Translate to:")
+        arrow.setStyleSheet("margin-left: 12px;")
+        lang_row.addWidget(arrow)
+        self._tgt_combo = QComboBox()
+        for name, _ in _TARGET_LANGS:
+            self._tgt_combo.addItem(name)
+        lang_row.addWidget(self._tgt_combo)
+
+        lang_row.addStretch()
+
+        self._spinner = QLabel("")
+        self._spinner.setStyleSheet("color: #ffcc00; font-size: 13px;")
+        lang_row.addWidget(self._spinner)
+        layout.addLayout(lang_row)
+
+        # --- Two-panel transcript + translation ---
+        panels = QHBoxLayout()
+        panels.setSpacing(10)
+
+        left_col = QVBoxLayout()
+        left_col.addWidget(QLabel("Transcript"))
         self._transcript = QTextEdit()
         self._transcript.setReadOnly(True)
         self._transcript.setPlaceholderText("Transcript will appear here...")
-        layout.addWidget(self._transcript, stretch=1)
+        left_col.addWidget(self._transcript)
+
+        right_col = QVBoxLayout()
+        right_col.addWidget(QLabel("Translation"))
+        self._translation = QTextEdit()
+        self._translation.setReadOnly(True)
+        self._translation.setPlaceholderText("Translation will appear here...")
+        right_col.addWidget(self._translation)
+
+        left_widget = QWidget()
+        left_widget.setLayout(left_col)
+        right_widget = QWidget()
+        right_widget.setLayout(right_col)
+
+        panels.addWidget(left_widget, 55)
+        panels.addWidget(right_widget, 45)
+        layout.addLayout(panels, stretch=1)
 
         # --- Bottom controls ---
         bottom = QHBoxLayout()
@@ -105,7 +185,6 @@ class MainWindow(QMainWindow):
         layout.addLayout(bottom)
 
         self.setStatusBar(QStatusBar())
-
         self._set_idle_state()
 
         self._btn_record.clicked.connect(self._on_record)
@@ -168,6 +247,7 @@ class MainWindow(QMainWindow):
         self._is_paused = False
         self._btn_pause.setText("Pause")
         self._set_idle_state()
+        self.set_transcribing(False)
         self.recording_stopped.emit()
 
     def _tick(self):
@@ -180,16 +260,37 @@ class MainWindow(QMainWindow):
         s = self._elapsed_seconds % 60
         self._timer_label.setText(f"{h:02d}:{m:02d}:{s:02d}")
 
-    # --- Public API for main.py ---
+    # --- Public API ---
 
     def show_status(self, message: str):
         self.statusBar().showMessage(message)
 
     def append_transcript(self, text: str):
         self._transcript.append(text)
+        self._transcript.verticalScrollBar().setValue(
+            self._transcript.verticalScrollBar().maximum()
+        )
+
+    def append_translation(self, text: str):
+        self._translation.append(text)
+        self._translation.verticalScrollBar().setValue(
+            self._translation.verticalScrollBar().maximum()
+        )
+
+    def set_transcribing(self, active: bool):
+        self._spinner.setText("⏳ Transcribing..." if active else "")
+
+    def get_source_lang(self) -> str:
+        idx = self._src_combo.currentIndex()
+        return _SOURCE_LANGS[idx][1]
+
+    def get_target_lang(self) -> str:
+        idx = self._tgt_combo.currentIndex()
+        return _TARGET_LANGS[idx][1]
 
     def show_error(self, message: str):
         self._set_idle_state()
         self._timer.stop()
         self._btn_pause.setText("Pause")
+        self.set_transcribing(False)
         self.statusBar().showMessage(f"Error: {message}")

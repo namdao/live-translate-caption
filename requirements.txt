@@ -2,3 +2,5 @@ sounddevice==0.4.6
 soundfile==0.12.1
 PyQt6==6.4.2
 numpy==1.26.0
+mlx-whisper>=0.4.3
+deep-translator==1.11.4

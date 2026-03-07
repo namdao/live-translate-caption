@@ -87,9 +87,12 @@ class Recorder:
                 "and ensure Terminal (or your Python app) has access."
             )
 
+        # Normalize to -3 dBFS (peak = 0.707) so the file is always audible
+        audio_data = audio_data * (0.707 / max_amp)
+
         save_path = self._get_save_path()
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        sf.write(str(save_path), audio_data, self.SAMPLE_RATE)
+        sf.write(str(save_path), audio_data, self.SAMPLE_RATE, subtype='PCM_16')
         self._chunks = []
         return str(save_path)
 
