@@ -192,34 +192,36 @@ class MainWindow(QMainWindow):
         self._refresh_devices()
 
         # --- Backend selector ---
-        backend_group = QGroupBox("Whisper Backend")
+        backend_group = QGroupBox("Backend")
         backend_layout = QVBoxLayout(backend_group)
         backend_layout.setSpacing(2)
 
         self._backend_group = QButtonGroup(self)
-        self._rb_mlx    = QRadioButton("MLX  (Apple GPU)")
-        self._rb_openai = QRadioButton("OpenAI  (CPU)")
-        self._rb_mlx.setChecked(True)
-        self._backend_group.addButton(self._rb_mlx)
-        self._backend_group.addButton(self._rb_openai)
-        backend_layout.addWidget(self._rb_mlx)
-        backend_layout.addWidget(self._rb_openai)
+        self._rb_mlx          = QRadioButton("MLX  (Apple GPU)")
+        self._rb_openai       = QRadioButton("OpenAI  (CPU)")
+        self._rb_live_captions = QRadioButton("Live Captions  (System)")
+        self._rb_live_captions.setChecked(True)
+        for rb in (self._rb_mlx, self._rb_openai, self._rb_live_captions):
+            self._backend_group.addButton(rb)
+            backend_layout.addWidget(rb)
 
         self._backend_group.buttonClicked.connect(self._on_backend_clicked)
         layout.addWidget(backend_group)
 
         # --- Settings (model size) ---
-        settings_group = QGroupBox("Whisper Model")
-        settings_layout = QVBoxLayout(settings_group)
+        self._settings_group = QGroupBox("MLX Model")
+        settings_layout = QVBoxLayout(self._settings_group)
         settings_layout.setSpacing(2)
 
         self._model_group = QButtonGroup(self)
         default_model = "turbo"
+        self._model_radio_btns = []
         for size in _MODEL_SIZES:
             rb = QRadioButton(size)
             if size == default_model:
                 rb.setChecked(True)
             self._model_group.addButton(rb)
+            self._model_radio_btns.append(rb)
             settings_layout.addWidget(rb)
 
         self._model_group.buttonClicked.connect(
@@ -230,7 +232,9 @@ class MainWindow(QMainWindow):
         self._model_progress.setVisible(False)
         self._model_progress.setRange(0, 0)  # indeterminate
         settings_layout.addWidget(self._model_progress)
-        layout.addWidget(settings_group)
+        layout.addWidget(self._settings_group)
+        # Hide model section on startup since Live Captions is default
+        self._settings_group.setVisible(False)
 
         # --- Output folder ---
         output_group = QGroupBox("Output Folder")
@@ -567,10 +571,22 @@ class MainWindow(QMainWindow):
         return btn.text() if btn else "turbo"
 
     def get_selected_backend(self) -> str:
+        if self._rb_live_captions.isChecked():
+            return "live_captions"
         return "mlx" if self._rb_mlx.isChecked() else "openai"
 
     def _on_backend_clicked(self, btn):
-        backend = "mlx" if btn is self._rb_mlx else "openai"
+        backend = self.get_selected_backend()
+
+        if backend == "live_captions":
+            # No model needed — hide the entire model section
+            self._settings_group.setVisible(False)
+        else:
+            self._settings_group.setVisible(True)
+            self._settings_group.setTitle(
+                "MLX Model" if backend == "mlx" else "OpenAI Model"
+            )
+
         self.backend_changed.emit(backend)
 
     def show_error(self, message: str):

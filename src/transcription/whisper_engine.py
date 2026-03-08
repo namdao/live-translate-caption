@@ -32,7 +32,13 @@ def _filter(text: str, lang: str) -> tuple:
 # ── MLX Whisper (Apple Silicon GPU) ──────────────────────────────────────────
 
 class MLXWhisperEngine:
-    _HF_REPO = "mlx-community/whisper-{size}"
+    # HuggingFace repo names differ per model size
+    _HF_REPOS = {
+        "tiny":  "mlx-community/whisper-tiny",
+        "base":  "mlx-community/whisper-base-mlx",
+        "small": "mlx-community/whisper-small-mlx",
+        "turbo": "mlx-community/whisper-turbo",
+    }
 
     def __init__(self, model_size: str = DEFAULT_MODEL_SIZE):
         try:
@@ -43,7 +49,12 @@ class MLXWhisperEngine:
                 "mlx-whisper is not installed. Run: pip install mlx-whisper"
             )
 
-        self._repo = self._HF_REPO.format(size=model_size)
+        self._repo = self._HF_REPOS.get(model_size)
+        if not self._repo:
+            raise TranscriptionError(
+                f"MLX model '{model_size}' not available. "
+                f"Choose from: {', '.join(self._HF_REPOS)}"
+            )
         print(f"[MLX] Loading '{model_size}' from {self._repo} ...", flush=True)
         try:
             dummy = np.zeros(16000, dtype=np.float32)
