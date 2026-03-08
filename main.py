@@ -3,7 +3,7 @@ import sys
 import threading
 import time
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 
 from src.audio.recorder import MicrophoneNotFoundError, Recorder
@@ -13,6 +13,12 @@ from src.translation.translator import Translator
 from src.ui.main_window import MainWindow
 
 
+class _Bridge(QObject):
+    """Thread-safe signal bridge: background threads emit → main thread receives."""
+    transcription_ready = pyqtSignal(str, str)   # (timestamp, text)
+    translation_ready   = pyqtSignal(str, str)   # (timestamp, translation)
+
+
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("RealTime Recorder")
@@ -20,21 +26,22 @@ def main():
     recorder = Recorder()
     window = MainWindow()
     translator = Translator()
+    bridge = _Bridge()
 
     result_queue: queue.Queue = queue.Queue()
-    translation_queue: queue.Queue = queue.Queue()
 
     whisper_engine: list = [None]
     engine_error: list = [None]
     engine_ready = threading.Event()
 
-    def load_engine(model_size: str = None):
+    def load_engine(model_size: str = None, backend: str = None):
         engine_ready.clear()
         engine_error[0] = None
         whisper_engine[0] = None
         size = model_size or window.get_selected_model_size()
+        bknd = backend or window.get_selected_backend()
         try:
-            whisper_engine[0] = WhisperEngine(model_size=size)
+            whisper_engine[0] = WhisperEngine(model_size=size, backend=bknd)
         except TranscriptionError as e:
             engine_error[0] = str(e)
         finally:
@@ -47,17 +54,39 @@ def main():
     engine_status_shown = [False]
     record_start_time: list = [0.0]
 
-    # --- Reload model when user changes size in sidebar ---
+    # --- Reload model when user changes size or backend ---
     def on_model_size_changed(size: str):
         engine_status_shown[0] = False
         window.set_model_loading(True)
         window.show_status(f"Loading '{size}' model...")
         threading.Thread(target=load_engine, args=(size,), daemon=True).start()
 
+    def on_backend_changed(backend: str):
+        engine_status_shown[0] = False
+        window.set_model_loading(True)
+        window.show_status(f"Switching to {backend.upper()} backend...")
+        threading.Thread(target=load_engine, kwargs={"backend": backend}, daemon=True).start()
+
     window.model_size_changed.connect(on_model_size_changed)
+    window.backend_changed.connect(on_backend_changed)
 
+    # --- Translation signal: fires immediately from translator thread → no poll wait ---
+    bridge.translation_ready.connect(window.update_segment_translation)
 
-    # --- Poll transcript + translation queues (200ms) ---
+    # --- Transcription signal: fires from poll timer → add segment + kick off translation ---
+    def on_transcription(timestamp: str, text: str):
+        window.add_segment(timestamp, text)
+        window.set_transcribing(False)
+        src = window.get_source_lang()
+        tgt = window.get_target_lang()
+        translator.translate_async(
+            text, src, tgt,
+            lambda result, ts=timestamp: bridge.translation_ready.emit(ts, result),
+        )
+
+    bridge.transcription_ready.connect(on_transcription)
+
+    # --- Poll transcript queue (100ms) ---
     def poll():
         if not engine_status_shown[0] and engine_ready.is_set():
             engine_status_shown[0] = True
@@ -70,27 +99,12 @@ def main():
         while True:
             try:
                 timestamp, text, language = result_queue.get_nowait()
-                window.add_segment(timestamp, text)
-                window.set_transcribing(False)
-                src = window.get_source_lang()
-                tgt = window.get_target_lang()
-
-                def on_translated(result, ts=timestamp):
-                    translation_queue.put((ts, result))
-
-                translator.translate_async(text, src, tgt, on_translated)
-            except queue.Empty:
-                break
-
-        while True:
-            try:
-                timestamp, result = translation_queue.get_nowait()
-                window.update_segment_translation(timestamp, result)
+                bridge.transcription_ready.emit(timestamp, text)
             except queue.Empty:
                 break
 
     poll_timer = QTimer()
-    poll_timer.setInterval(200)
+    poll_timer.setInterval(100)
     poll_timer.timeout.connect(poll)
     poll_timer.start()
 

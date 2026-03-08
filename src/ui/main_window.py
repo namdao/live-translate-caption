@@ -126,8 +126,9 @@ class MainWindow(QMainWindow):
     recording_stopped  = pyqtSignal()
     recording_paused   = pyqtSignal()
     recording_resumed  = pyqtSignal()
-    model_size_changed = pyqtSignal(str)
-    save_folder_changed = pyqtSignal(str)
+    model_size_changed    = pyqtSignal(str)
+    backend_changed       = pyqtSignal(str)   # 'mlx' or 'openai'
+    save_folder_changed   = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -189,6 +190,23 @@ class MainWindow(QMainWindow):
         dev_layout.addWidget(refresh_btn)
         layout.addWidget(dev_group)
         self._refresh_devices()
+
+        # --- Backend selector ---
+        backend_group = QGroupBox("Whisper Backend")
+        backend_layout = QVBoxLayout(backend_group)
+        backend_layout.setSpacing(2)
+
+        self._backend_group = QButtonGroup(self)
+        self._rb_mlx    = QRadioButton("MLX  (Apple GPU)")
+        self._rb_openai = QRadioButton("OpenAI  (CPU)")
+        self._rb_mlx.setChecked(True)
+        self._backend_group.addButton(self._rb_mlx)
+        self._backend_group.addButton(self._rb_openai)
+        backend_layout.addWidget(self._rb_mlx)
+        backend_layout.addWidget(self._rb_openai)
+
+        self._backend_group.buttonClicked.connect(self._on_backend_clicked)
+        layout.addWidget(backend_group)
 
         # --- Settings (model size) ---
         settings_group = QGroupBox("Whisper Model")
@@ -547,6 +565,13 @@ class MainWindow(QMainWindow):
     def get_selected_model_size(self) -> str:
         btn = self._model_group.checkedButton()
         return btn.text() if btn else "turbo"
+
+    def get_selected_backend(self) -> str:
+        return "mlx" if self._rb_mlx.isChecked() else "openai"
+
+    def _on_backend_clicked(self, btn):
+        backend = "mlx" if btn is self._rb_mlx else "openai"
+        self.backend_changed.emit(backend)
 
     def show_error(self, message: str):
         self._set_idle_state()
