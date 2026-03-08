@@ -1,6 +1,7 @@
 import queue
 import sys
 import threading
+import time
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
@@ -44,6 +45,7 @@ def main():
 
     chunk_processor: list = [None]
     engine_status_shown = [False]
+    record_start_time: list = [0.0]
 
     # --- Reload model when user changes size in sidebar ---
     def on_model_size_changed(size: str):
@@ -54,8 +56,6 @@ def main():
 
     window.model_size_changed.connect(on_model_size_changed)
 
-    # --- Save folder ---
-    window.save_folder_changed.connect(lambda p: setattr(recorder, 'save_dir', p))
 
     # --- Poll transcript + translation queues (200ms) ---
     def poll():
@@ -70,7 +70,7 @@ def main():
         while True:
             try:
                 timestamp, text, language = result_queue.get_nowait()
-                window.append_transcript(f"[{timestamp}] {text}")
+                window.add_segment(timestamp, text)
                 window.set_transcribing(False)
                 src = window.get_source_lang()
                 tgt = window.get_target_lang()
@@ -85,7 +85,7 @@ def main():
         while True:
             try:
                 timestamp, result = translation_queue.get_nowait()
-                window.append_translation(f"[{timestamp}] {result}")
+                window.update_segment_translation(timestamp, result)
             except queue.Empty:
                 break
 
@@ -119,6 +119,7 @@ def main():
             window.show_error(engine_error[0])
             return
         try:
+            record_start_time[0] = time.time()
             recorder.start(device_index=window.get_device_index())
             cp = ChunkProcessor(
                 recorder.audio_queue, result_queue, whisper_engine[0],
@@ -134,9 +135,17 @@ def main():
             chunk_processor[0].stop()
             chunk_processor[0] = None
         try:
-            path = recorder.stop()
-            if path:
-                window.show_status(f"Saved: {path}")
+            result = recorder.stop()
+            if result:
+                stem, audio_data, sample_rate = result
+                recorder_elapsed = int(time.time() - record_start_time[0])
+                h = recorder_elapsed // 3600
+                m = (recorder_elapsed % 3600) // 60
+                s = recorder_elapsed % 60
+                window.set_last_recording(stem, audio_data, sample_rate)
+                window.show_status(
+                    f"Recorded: {stem}  —  duration {h:02d}:{m:02d}:{s:02d}  —  click Export to save"
+                )
             else:
                 window.show_status("Stopped (no audio recorded)")
         except Exception as e:

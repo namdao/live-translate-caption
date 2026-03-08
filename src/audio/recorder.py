@@ -2,9 +2,7 @@ import queue
 import threading
 import numpy as np
 import sounddevice as sd
-import soundfile as sf
 from datetime import datetime
-from pathlib import Path
 
 
 class MicrophoneNotFoundError(Exception):
@@ -24,7 +22,6 @@ class Recorder:
         self._paused = False
         self._stream = None
         self._lock = threading.Lock()
-        self._save_dir = Path.home() / "Recordings"
 
     def _callback(self, indata, frames, time, status):
         if self._recording and not self._paused:
@@ -80,7 +77,8 @@ class Recorder:
         with self._lock:
             self._paused = False
 
-    def stop(self) -> str:
+    def stop(self):
+        """Stop recording. Returns (stem, audio_data, sample_rate) or None if no audio."""
         with self._lock:
             self._recording = False
 
@@ -93,6 +91,8 @@ class Recorder:
             return None
 
         audio_data = np.concatenate(self._chunks)
+        self._chunks = []
+
         max_amp = float(np.max(np.abs(audio_data)))
         if max_amp < 0.001:
             raise MicrophoneNotFoundError(
@@ -103,23 +103,8 @@ class Recorder:
         # Normalize to -3 dBFS (peak = 0.707) so the file is always audible
         audio_data = audio_data * (0.707 / max_amp)
 
-        save_path = self._get_save_path()
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        sf.write(str(save_path), audio_data, self.SAMPLE_RATE, subtype='PCM_16')
-        self._chunks = []
-        return str(save_path)
-
-    def _get_save_path(self) -> Path:
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        return self._save_dir / f"{timestamp}.wav"
-
-    @property
-    def save_dir(self) -> Path:
-        return self._save_dir
-
-    @save_dir.setter
-    def save_dir(self, path):
-        self._save_dir = Path(path)
+        stem = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        return stem, audio_data, self.SAMPLE_RATE
 
     @property
     def audio_queue(self) -> queue.Queue:

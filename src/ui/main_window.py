@@ -139,6 +139,10 @@ class MainWindow(QMainWindow):
         self._is_recording = False
         self._is_paused = False
         self._save_folder = str(Path.home() / "Recordings")
+        self._segments: list = []        # [{timestamp, text, translation}]
+        self._last_stem: str = ""
+        self._last_audio_data = None
+        self._last_sample_rate: int = 16000
 
         self._build_ui()
         self._setup_timer()
@@ -305,6 +309,9 @@ class MainWindow(QMainWindow):
         self._btn_pause.setToolTip("Pause / Resume  [Space]")
         self._btn_stop   = QPushButton("■ Stop")
         self._btn_stop.setToolTip("Stop recording  [Esc]")
+        self._btn_export = QPushButton("Export...")
+        self._btn_export.setToolTip("Export transcript and audio  [Ctrl+E]")
+        self._btn_export.setEnabled(False)
 
         self._timer_label = QLabel("00:00:00")
         self._timer_label.setFont(QFont("Courier", 14))
@@ -315,6 +322,7 @@ class MainWindow(QMainWindow):
         bottom.addWidget(self._btn_record)
         bottom.addWidget(self._btn_pause)
         bottom.addWidget(self._btn_stop)
+        bottom.addWidget(self._btn_export)
         bottom.addStretch()
         bottom.addWidget(self._timer_label)
         bottom.addWidget(self._level_meter)
@@ -323,6 +331,7 @@ class MainWindow(QMainWindow):
         self._btn_record.clicked.connect(self._on_record)
         self._btn_pause.clicked.connect(self._on_pause)
         self._btn_stop.clicked.connect(self._on_stop)
+        self._btn_export.clicked.connect(self._on_export)
 
         return content
 
@@ -341,6 +350,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self).activated.connect(
             self._on_stop
         )
+        QShortcut(QKeySequence("Ctrl+E"), self).activated.connect(
+            self._on_export
+        )
 
     # ------------------------------------------------------------------ #
     #  State helpers                                                       #
@@ -353,11 +365,14 @@ class MainWindow(QMainWindow):
         self._btn_pause.setText("⏸ Pause")
         self._status_dot.setStyleSheet("color: #444466; font-size: 20px;")
         self._waveform.set_active(False)
+        # Enable Export only if there is something to export
+        self._btn_export.setEnabled(bool(self._last_audio_data is not None or self._segments))
 
     def _set_recording_state(self):
         self._btn_record.setEnabled(False)
         self._btn_pause.setEnabled(True)
         self._btn_stop.setEnabled(True)
+        self._btn_export.setEnabled(False)
         self._btn_pause.setText("⏸ Pause")
         self._status_dot.setStyleSheet("color: #e94560; font-size: 20px;")
         self._waveform.set_active(True)
@@ -376,6 +391,11 @@ class MainWindow(QMainWindow):
 
     def _on_record(self):
         self._elapsed_seconds = 0
+        self._segments = []
+        self._last_stem = ""
+        self._last_audio_data = None
+        self._transcript.clear()
+        self._translation.clear()
         self._update_timer_label()
         self._timer.start()
         self._is_recording = True
@@ -404,6 +424,18 @@ class MainWindow(QMainWindow):
         self._set_idle_state()
         self.set_transcribing(False)
         self.recording_stopped.emit()
+
+    def _on_export(self):
+        from src.ui.export_dialog import ExportDialog
+        dlg = ExportDialog(
+            self,
+            self._last_stem,
+            self._last_audio_data,
+            self._last_sample_rate,
+            self._segments,
+            self._save_folder,
+        )
+        dlg.exec()
 
     def _toggle_record_pause(self):
         if not self._is_recording:
@@ -469,11 +501,29 @@ class MainWindow(QMainWindow):
             self._transcript.verticalScrollBar().maximum()
         )
 
+    def add_segment(self, timestamp: str, text: str):
+        """Add a new transcript segment and display it."""
+        self._segments.append({"timestamp": timestamp, "text": text, "translation": ""})
+        self.append_transcript(f"[{timestamp}] {text}")
+
+    def update_segment_translation(self, timestamp: str, translation: str):
+        """Attach translation to matching segment and display it."""
+        for seg in reversed(self._segments):
+            if seg["timestamp"] == timestamp:
+                seg["translation"] = translation
+                break
+        self.append_translation(f"[{timestamp}] {translation}")
+
     def append_translation(self, text: str):
         self._translation.append(text)
         self._translation.verticalScrollBar().setValue(
             self._translation.verticalScrollBar().maximum()
         )
+
+    def set_last_recording(self, stem: str, audio_data, sample_rate: int):
+        self._last_stem = stem
+        self._last_audio_data = audio_data
+        self._last_sample_rate = sample_rate
 
     def set_transcribing(self, active: bool):
         self._spinner.setText("⏳ Transcribing..." if active else "")
