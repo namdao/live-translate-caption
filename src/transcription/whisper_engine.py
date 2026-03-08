@@ -5,8 +5,7 @@ import numpy as np
 import torch
 import whisper
 
-# turbo = large-v3 distilled, ~8x faster, same accuracy
-MODEL_SIZE = "turbo"
+DEFAULT_MODEL_SIZE = "turbo"
 
 _HALLUCINATION_PHRASES = {
     "thank you", "thanks", "thank you so much", "thanks for watching",
@@ -19,11 +18,11 @@ class TranscriptionError(Exception):
 
 
 class WhisperEngine:
-    def __init__(self):
+    def __init__(self, model_size: str = DEFAULT_MODEL_SIZE):
         device = "cpu"  # MPS lacks sparse tensor ops required by Whisper
-        print(f"Loading Whisper '{MODEL_SIZE}' on {device}...", flush=True)
+        print(f"Loading Whisper '{model_size}' on {device}...", flush=True)
         try:
-            self._model = whisper.load_model(MODEL_SIZE, device=device)
+            self._model = whisper.load_model(model_size, device=device)
             self._device = device
             print("Whisper model loaded.", flush=True)
         except Exception as e:

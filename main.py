@@ -20,17 +20,20 @@ def main():
     window = MainWindow()
     translator = Translator()
 
-    result_queue: queue.Queue = queue.Queue()       # (timestamp, text, language)
-    translation_queue: queue.Queue = queue.Queue()  # (timestamp, translated_text)
+    result_queue: queue.Queue = queue.Queue()
+    translation_queue: queue.Queue = queue.Queue()
 
-    # --- Load Whisper model in background (keeps UI responsive) ---
     whisper_engine: list = [None]
     engine_error: list = [None]
     engine_ready = threading.Event()
 
-    def load_engine():
+    def load_engine(model_size: str = None):
+        engine_ready.clear()
+        engine_error[0] = None
+        whisper_engine[0] = None
+        size = model_size or window.get_selected_model_size()
         try:
-            whisper_engine[0] = WhisperEngine()
+            whisper_engine[0] = WhisperEngine(model_size=size)
         except TranscriptionError as e:
             engine_error[0] = str(e)
         finally:
@@ -42,16 +45,29 @@ def main():
     chunk_processor: list = [None]
     engine_status_shown = [False]
 
-    # --- Poll queues every 200ms (main thread — safe for UI updates) ---
+    # --- Reload model when user changes size in sidebar ---
+    def on_model_size_changed(size: str):
+        engine_status_shown[0] = False
+        window.set_model_loading(True)
+        window.show_status(f"Loading '{size}' model...")
+        threading.Thread(target=load_engine, args=(size,), daemon=True).start()
+
+    window.model_size_changed.connect(on_model_size_changed)
+
+    # --- Save folder ---
+    window.save_folder_changed.connect(lambda p: setattr(recorder, 'save_dir', p))
+
+    # --- Poll transcript + translation queues (200ms) ---
     def poll():
         if not engine_status_shown[0] and engine_ready.is_set():
             engine_status_shown[0] = True
+            window.set_model_loading(False)
             if engine_error[0]:
                 window.show_status(f"Error: {engine_error[0]}")
             else:
                 window.show_status("Ready — click Record to start")
 
-        while not result_queue.empty():
+        while True:
             try:
                 timestamp, text, language = result_queue.get_nowait()
                 window.append_transcript(f"[{timestamp}] {text}")
@@ -66,7 +82,7 @@ def main():
             except queue.Empty:
                 break
 
-        while not translation_queue.empty():
+        while True:
             try:
                 timestamp, result = translation_queue.get_nowait()
                 window.append_translation(f"[{timestamp}] {result}")
@@ -77,6 +93,21 @@ def main():
     poll_timer.setInterval(200)
     poll_timer.timeout.connect(poll)
     poll_timer.start()
+
+    # --- Poll viz queue (50ms) for waveform + level meter ---
+    def poll_viz():
+        vq = recorder.viz_queue
+        while True:
+            try:
+                rms = vq.get_nowait()
+                window.push_audio_level(rms)
+            except queue.Empty:
+                break
+
+    viz_timer = QTimer()
+    viz_timer.setInterval(50)
+    viz_timer.timeout.connect(poll_viz)
+    viz_timer.start()
 
     # --- Recording callbacks ---
 

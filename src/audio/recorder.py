@@ -18,26 +18,24 @@ class Recorder:
 
     def __init__(self, audio_queue: queue.Queue = None):
         self._audio_queue = audio_queue or queue.Queue()
+        self._viz_queue: queue.Queue = queue.Queue(maxsize=100)
         self._chunks = []
         self._recording = False
         self._paused = False
         self._stream = None
         self._lock = threading.Lock()
+        self._save_dir = Path.home() / "Recordings"
 
     def _callback(self, indata, frames, time, status):
         if self._recording and not self._paused:
             chunk = indata.copy().flatten()
             self._chunks.append(chunk)
             self._audio_queue.put(chunk)
-
-    @staticmethod
-    def list_input_devices() -> list:
-        """Returns list of dicts: {index, name} for all input-capable devices."""
-        devices = []
-        for i, d in enumerate(sd.query_devices()):
-            if d['max_input_channels'] > 0:
-                devices.append({'index': i, 'name': d['name']})
-        return devices
+            rms = float(np.sqrt(np.mean(chunk ** 2)))
+            try:
+                self._viz_queue.put_nowait(rms)
+            except queue.Full:
+                pass  # drop oldest — UI is behind, not critical
 
     def start(self, device_index: int = None):
         """Start recording. device_index=None uses system default."""
@@ -113,8 +111,20 @@ class Recorder:
 
     def _get_save_path(self) -> Path:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        return Path.home() / "Recordings" / f"{timestamp}.wav"
+        return self._save_dir / f"{timestamp}.wav"
+
+    @property
+    def save_dir(self) -> Path:
+        return self._save_dir
+
+    @save_dir.setter
+    def save_dir(self, path):
+        self._save_dir = Path(path)
 
     @property
     def audio_queue(self) -> queue.Queue:
         return self._audio_queue
+
+    @property
+    def viz_queue(self) -> queue.Queue:
+        return self._viz_queue
